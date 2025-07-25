@@ -50,7 +50,13 @@ def get_ocr_result(image, data_type, output_format):
     prompt = PROMPTS.get(data_type, {}).get(output_format, "画像からテキストを抽出してください。")
     try:
         # モデル名を修正
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model_name = 'gemini-2.5-flash'  # ★ 使用するモデル名をここで定義
+        model = genai.GenerativeModel(model_name)
+        
+        # --- 確認用コード ---
+        st.info(f"使用中のモデル: {model_name}") # ← デバッグ用。開発時のみ有効化
+        # --------------------
+
         img = image.convert("RGB")
         response = model.generate_content([prompt, img])
         
