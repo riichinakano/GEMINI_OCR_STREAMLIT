@@ -2,6 +2,8 @@ import streamlit as st
 from PIL import Image
 import google.generativeai as genai
 import os
+import pandas as pd
+from io import BytesIO
 
 # --- 定数設定 ---
 MAX_TOTAL_SIZE_MB = 10
@@ -44,6 +46,76 @@ PROMPTS = {
         "md": "この画像に含まれるテキストを、元の画像のレイアウトを維持したまま、Markdownのコードブロック内に書き出してください。"
     }
 }
+
+# --- MD → DataFrame 変換関数 ---
+def md_table_to_dataframe(md_text):
+    """
+    Markdown形式のテーブルをpandas DataFrameに変換
+
+    Args:
+        md_text (str): Markdown形式のテキスト
+
+    Returns:
+        pd.DataFrame: 変換後のDataFrame
+        None: テーブルが見つからない場合
+    """
+    lines = md_text.strip().split('\n')
+
+    # テーブル行を抽出（'|'で始まる行）
+    table_lines = [line for line in lines if line.strip().startswith('|')]
+
+    if len(table_lines) < 2:
+        return None
+
+    # ヘッダー行とデータ行を分離
+    header_line = table_lines[0]
+    # 2行目は区切り行（|:-----|:-----|）なので除外
+    data_lines = table_lines[2:] if len(table_lines) > 2 else []
+
+    # ヘッダーをパース
+    headers = [cell.strip() for cell in header_line.split('|')[1:-1]]
+
+    # データ行をパース
+    data = []
+    for line in data_lines:
+        cells = [cell.strip() for cell in line.split('|')[1:-1]]
+        if cells:  # 空行を除外
+            data.append(cells)
+
+    if not data:
+        return None
+
+    # DataFrameを作成
+    df = pd.DataFrame(data, columns=headers)
+
+    # 空の列を削除
+    df = df.loc[:, (df != '').any(axis=0)]
+
+    return df
+
+
+# --- Excel出力関数 ---
+def create_excel_download_button(df, filename="ocr_result.xlsx"):
+    """
+    DataFrameからExcelファイルを生成してダウンロードボタンを表示
+
+    Args:
+        df (pd.DataFrame): 出力するDataFrame
+        filename (str): ダウンロードファイル名
+    """
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='OCR結果')
+    excel_data = output.getvalue()
+
+    st.download_button(
+        label="Excelファイルとして保存",
+        data=excel_data,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+
 
 # --- OCR処理のコア関数 (ocr_app.pyから流用・少し変更) ---
 def get_ocr_result(image, data_type, output_format):
@@ -172,5 +244,17 @@ if st.session_state.ocr_result:
         mime=f"text/{download_format}",
         use_container_width=True
     )
+
+    # MD形式の場合、Excelダウンロードボタンを追加
+    if st.session_state.get('output_format') == 'md':
+        md_text = st.session_state.get('result_text', '')
+
+        if md_text:
+            df = md_table_to_dataframe(md_text)
+
+            if df is not None and not df.empty:
+                create_excel_download_button(df)
+            else:
+                st.warning("Markdown形式のテーブルが見つかりませんでした。Excelファイルとして保存するには、テーブル形式（| 列1 | 列2 |）のデータが必要です。")
 else:
     st.info("↑ 上のボックスから画像ファイルをアップロードし、「文字起こしを実行」ボタンを押してください。")
